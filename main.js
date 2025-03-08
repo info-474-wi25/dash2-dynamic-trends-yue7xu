@@ -3,203 +3,134 @@ const margin = { top: 50, right: 30, bottom: 60, left: 70 };
 const width = 900 - margin.left - margin.right;
 const height = 400 - margin.top - margin.bottom;
 
-// Create SVG containers for both charts
-const svgLine = d3.select("#lineChart1") // If you change this ID, you must change it in index.html too
+const svgLine = d3.select("#lineChart1")
     .append("svg")
     .attr("width", width + margin.left + margin.right)
     .attr("height", height + margin.top + margin.bottom)
     .append("g")
     .attr("transform", `translate(${margin.left},${margin.top})`);
 
-// const svg2_RENAME = d3.select("#lineChart2")
-//     .append("svg")
-//     .attr("width", width + margin.left + margin.right)
-//     .attr("height", height + margin.top + margin.bottom)
-//     .append("g")
-//     .attr("transform", `translate(${margin.left},${margin.top})`);
-
-// (If applicable) Tooltip element for interactivity
-// const tooltip = ...
-
-// // 2.a: LOAD...
-// d3.csv("aircraft_incidents.csv").then(data => {
-//     // 2.b: ... AND TRANSFORM DATA
-//     // data.forEach(d => {
-//     //     d["year"] = +d["Year"];
-//     // });
-//     data.forEach(d => {
-//         d["year"] = +d["Year"];
-//     });
-
-//     console.log("Raw data:", data);
-//     // console.log("Years:", data.map(d => d.year));
-
-//     // 2.c: PREPARE DATA - Categorize Weather Conditions into Known Groups
-//     const weatherCategories = ["VMC", "IMC", "NA"];
-//     const categorizedData = data.map(d => ({
-//         ...d,
-//         weatherGroup: weatherCategories.includes(d.Weather_Condition_Cleaned) ? d.Weather_Condition_Cleaned : "Unknown"
-//     }));
-
-//     // // Check
-//     // console.log("Weather Categories:", categorizedData.slice(0, 5).map(d => ({
-//     //     Weather_Condition_Cleaned: d.Weather_Condition_Cleaned,
-//     //     weatherGroup: d.weatherGroup
-//     // })));
-
-//     // const categories = d3.rollup(categorizedData,
-//     //     v => d3.rollup(v,
-//     //         values => values.length || 0,
-//     //         d => d.year
-//     //     ),
-//     //     d => d.weatherGroup
-//     // );
-
-//     // // Check
-//     // console.log("Categories:", categories);
-//     const groupedData = d3.groups(categorizedData, d => d.weatherGroup, d => d.year)
-//     .map(([weatherGroup, yearGroups]) => ({
-//         weatherGroup,
-//         values: yearGroups.map(([year, entries]) => ({
-//             year,
-//             count: entries.length
-//         }))
-//     }));
 d3.csv("aircraft_incidents.csv").then(data => {
     data.forEach(d => {
         d.year = +d.Year;
-        d.totalConcerned = +d.Total_Concerned;
+        d.totalFatalInjuries = +d.Total_Fatal_Injuries;
+        d.totalSeriousInjuries = +d.Total_Serious_Injuries;
+        d.totalUninjured = +d.Total_Uninjured;
+        d.totalConcerned = d.totalFatalInjuries + d.totalSeriousInjuries + d.totalUninjured;
     });
-    
+
     const weatherCategories = ["VMC", "IMC", "UNK"];
-    const categorizedData = data.map(d => ({
-        year: d.year,
-        totalConcerned: d.totalConcerned,
-        weatherGroup: weatherCategories.includes(d.Weather_Condition_Cleaned) ? d.Weather_Condition_Cleaned : "UNK"
-    }));
-    
+
+    // ✅ 修正 groupedData 计算
     const groupedData = Array.from(
         d3.rollup(
-            categorizedData,
-            v => d3.sum(v, d => d.totalConcerned),
+            data,
+            v => ({
+                totalFatalInjuries: d3.sum(v, d => d.totalFatalInjuries),
+                totalSeriousInjuries: d3.sum(v, d => d.totalSeriousInjuries),
+                totalUninjured: d3.sum(v, d => d.totalUninjured),
+                totalConcerned: d3.sum(v, d => d.totalConcerned),
+            }),
             d => d.year,
-            d => d.weatherGroup
+            d => d.Weather_Condition_Cleaned
         ),
         ([year, weatherGroups]) => ({
             year,
-            values: Array.from(weatherGroups, ([weatherGroup, totalConcerned]) => ({
-                weatherGroup,
-                totalConcerned
-            }))
+            values: weatherCategories.map(weatherGroup => {
+                const dataObj = weatherGroups.get(weatherGroup) || {}; // 确保不会 undefined
+                return {
+                    weatherGroup,
+                    totalFatalInjuries: dataObj.totalFatalInjuries || 0,
+                    totalSeriousInjuries: dataObj.totalSeriousInjuries || 0,
+                    totalUninjured: dataObj.totalUninjured || 0,
+                    totalConcerned: dataObj.totalConcerned || 0
+                };
+            })
         })
-    ).sort((a, b) => a.year - b.year);    
-    
-    console.log("Grouped Data:", groupedData);
+    ).sort((a, b) => a.year - b.year);
 
-    // 3.a: SET SCALES FOR CHART 1
     const xScale = d3.scaleLinear()
         .domain(d3.extent(data, d => d.year))
         .range([0, width]);
 
-    const yScale = d3.scaleLinear()
-        .domain([0, d3.max(groupedData.flatMap(d => d.values.map(v => v.totalConcerned)))])
-        .range([height, 0]);
+    const yScale = d3.scaleLinear().range([height, 0]);
 
     const colorScale = d3.scaleOrdinal()
         .domain(weatherCategories)
         .range(["green", "red", "orange"]);
-    
-    // 4.a: PLOT DATA FOR CHART 1
+
     const line = d3.line()
         .x(d => xScale(d.year))
-        .y(d => yScale(d.totalConcerned));
+        .y(d => yScale(d.count)); 
 
-    weatherCategories.forEach(weatherGroup => {
-        const filteredData = groupedData.map(d => ({
-            year: d.year,
-            totalConcerned: d.values.find(v => v.weatherGroup === weatherGroup)?.totalConcerned || 0
-        }));
-
-        svgLine.append("path")
-            .datum(filteredData)
-            .attr("fill", "none")
-            .attr("stroke", colorScale(weatherGroup))
-            .attr("stroke-width", 2)
-            .attr("d", line);
-    });
-
-    // 5.a: ADD AXES FOR CHART 1
     svgLine.append("g")
         .attr("transform", `translate(0,${height})`)
         .call(d3.axisBottom(xScale).tickFormat(d3.format("d")));
 
-    svgLine.append("g")
-        .call(d3.axisLeft(yScale));
+    // ✅ 确保 Y 轴 class 存在
+    const yAxis = svgLine.append("g")
+        .attr("class", "y-axis"); 
 
-    const legend = svgLine.append("g")
-        .attr("transform", `translate(${width - 100}, 10)`);
+    function updateChart(selectedCategory) {
+        // 过滤并格式化数据
+        const filteredData = groupedData.map(d => ({
+            year: d.year,
+            values: d.values.map(v => ({
+                weatherGroup: v.weatherGroup,
+                count: v[selectedCategory] || 0 
+            }))
+        }));
 
-    legend.append("text")
-        .attr("x", 0)
-        .attr("y", -10)
-        .text("Weather Condition")
-        .style("font-size", "14px")
-        .style("font-weight", "bold");
+        // ✅ 修正 Y 轴范围计算
+        yScale.domain([
+            0,
+            d3.max(filteredData.flatMap(d => d.values.map(v => v.count)))
+        ]);
 
-    weatherCategories.forEach((weatherGroup, i) => {
-    legend.append("rect")
-        .attr("x", 0)
-        .attr("y", i * 20)
-        .attr("width", 12)
-        .attr("height", 12)
-        .attr("fill", colorScale(weatherGroup));
-    
-    legend.append("text")
-        .attr("x", 20)
-        .attr("y", i * 20 + 10)
-        .text(weatherGroup)
-        .attr("alignment-baseline", "middle")
-        .style("font-size", "12px");
-});
+        // ✅ 移除旧的折线
+        svgLine.selectAll(".data-line").remove();
 
-    
+        // ✅ 绘制新折线
+        weatherCategories.forEach(weatherGroup => {
+            const lineData = filteredData.map(d => ({
+                year: d.year,
+                count: d.values.find(v => v.weatherGroup === weatherGroup)?.count || 0
+            }));
 
-    // 6.a: ADD LABELS FOR CHART 1
-    svgLine.append("text")
-        .attr("x", width / 2)
-        .attr("y", height + margin.bottom - 10)
-        .attr("text-anchor", "middle")
-        .style("font-size", "12px")
-        .text("Year");
+            svgLine.append("path")
+                .datum(lineData)
+                .attr("class", "data-line")
+                .attr("fill", "none")
+                .attr("stroke", colorScale(weatherGroup))
+                .attr("stroke-width", 2)
+                .attr("d", line);
+        });
 
-    svgLine.append("text")
-        .attr("transform", "rotate(-90)")
-        .attr("x", -height / 2)
-        .attr("y", -margin.left + 15)
-        .attr("text-anchor", "middle")
-        .style("font-size", "12px")
-        .text("Incident Count");
+        // ✅ 确保 Y 轴更新
+        svgLine.select(".y-axis")
+            .transition()
+            .duration(1000)
+            .call(d3.axisLeft(yScale));
+    }        
 
-    // 7.a: ADD INTERACTIVITY FOR CHART 1
-    
+    // ✅ 修正 trendline 监听
+    d3.select("#trendline-toggle").on("change", function() {
+        const isChecked = d3.select(this).property("checked"); 
+        const selectedCategory = d3.select("#categorySelect").property("value");
 
-    // ==========================================
-    //         CHART 2 (if applicable)
-    // ==========================================
+        if (isChecked) {
+            drawTrendline(selectedCategory);
+        } else {
+            svgLine.selectAll(".trendline").remove();
+        }
+    });
 
-    // 3.b: SET SCALES FOR CHART 2
+    // ✅ 绑定事件监听到 dropdown
+    d3.select("#categorySelect").on("change", function () {
+        const selectedCategory = d3.select(this).property("value");
+        updateChart(selectedCategory);
+    });
 
-
-    // 4.b: PLOT DATA FOR CHART 2
-
-
-    // 5.b: ADD AXES FOR CHART 
-
-
-    // 6.b: ADD LABELS FOR CHART 2
-
-
-    // 7.b: ADD INTERACTIVITY FOR CHART 2
-
-
+    // ✅ 默认加载图表
+    updateChart("totalConcerned");
 });
