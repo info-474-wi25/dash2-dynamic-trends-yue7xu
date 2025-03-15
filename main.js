@@ -1,4 +1,3 @@
-// 1: SET GLOBAL VARIABLES
 const margin = { top: 50, right: 30, bottom: 60, left: 70 };
 const width = 900 - margin.left - margin.right;
 const height = 400 - margin.top - margin.bottom;
@@ -16,12 +15,16 @@ d3.csv("aircraft_incidents.csv").then(data => {
         d.totalFatalInjuries = +d.Total_Fatal_Injuries;
         d.totalSeriousInjuries = +d.Total_Serious_Injuries;
         d.totalUninjured = +d.Total_Uninjured;
-        d.totalConcerned = d.totalFatalInjuries + d.totalSeriousInjuries + d.totalUninjured;
     });
 
-    const weatherCategories = ["VMC", "IMC", "UNK"];
+    const weatherCategoryMap = {
+        "VMC": "Visual Meteorological Conditions",
+        "IMC": "Instrument Meteorological Conditions",
+        "UNK": "Unknown Weather Conditions"
+    };
 
-    // ✅ 修正 groupedData 计算
+    const weatherCategories = Object.keys(weatherCategoryMap);
+
     const groupedData = Array.from(
         d3.rollup(
             data,
@@ -29,7 +32,6 @@ d3.csv("aircraft_incidents.csv").then(data => {
                 totalFatalInjuries: d3.sum(v, d => d.totalFatalInjuries),
                 totalSeriousInjuries: d3.sum(v, d => d.totalSeriousInjuries),
                 totalUninjured: d3.sum(v, d => d.totalUninjured),
-                totalConcerned: d3.sum(v, d => d.totalConcerned),
             }),
             d => d.year,
             d => d.Weather_Condition_Cleaned
@@ -37,13 +39,12 @@ d3.csv("aircraft_incidents.csv").then(data => {
         ([year, weatherGroups]) => ({
             year,
             values: weatherCategories.map(weatherGroup => {
-                const dataObj = weatherGroups.get(weatherGroup) || {}; // 确保不会 undefined
+                const dataObj = weatherGroups.get(weatherGroup) || {};
                 return {
-                    weatherGroup,
+                    weatherGroup, // Keep the original dataset label
                     totalFatalInjuries: dataObj.totalFatalInjuries || 0,
                     totalSeriousInjuries: dataObj.totalSeriousInjuries || 0,
-                    totalUninjured: dataObj.totalUninjured || 0,
-                    totalConcerned: dataObj.totalConcerned || 0
+                    totalUninjured: dataObj.totalUninjured || 0
                 };
             })
         })
@@ -65,32 +66,72 @@ d3.csv("aircraft_incidents.csv").then(data => {
 
     svgLine.append("g")
         .attr("transform", `translate(0,${height})`)
+        .attr("class", "x-axis")
         .call(d3.axisBottom(xScale).tickFormat(d3.format("d")));
 
-    // ✅ 确保 Y 轴 class 存在
     const yAxis = svgLine.append("g")
-        .attr("class", "y-axis"); 
+        .attr("class", "y-axis");
+
+    svgLine.append("text")
+        .attr("id", "x-axis-label")
+        .attr("x", width / 2)
+        .attr("y", height + margin.bottom - 20)
+        .attr("text-anchor", "middle")
+        .style("font-size", "14px")
+        .text("Year");
+
+    svgLine.append("text")
+        .attr("id", "y-axis-label")
+        .attr("transform", "rotate(-90)")
+        .attr("x", -height / 2)
+        .attr("y", -margin.left + 15)
+        .attr("text-anchor", "middle")
+        .style("font-size", "14px")
+        .text("Related People Count");
+
+    const legend = svgLine.append("g")
+        .attr("id", "legend")
+        .attr("transform", `translate(${width - 200}, -10)`);
+
+    legend.append("text")
+        .attr("x", 0)
+        .attr("y", -10)
+        .text("Weather Condition")
+        .style("font-size", "14px")
+        .style("font-weight", "bold");
+
+    weatherCategories.forEach((weatherGroup, i) => {
+        legend.append("rect")
+            .attr("x", 0)
+            .attr("y", i * 20)
+            .attr("width", 12)
+            .attr("height", 12)
+            .attr("fill", colorScale(weatherGroup));
+
+        legend.append("text")
+            .attr("x", 20)
+            .attr("y", i * 20 + 10)
+            .text(weatherCategoryMap[weatherGroup]) // Map dataset labels to readable names
+            .attr("alignment-baseline", "middle")
+            .style("font-size", "12px");
+    });
 
     function updateChart(selectedCategory) {
-        // 过滤并格式化数据
         const filteredData = groupedData.map(d => ({
             year: d.year,
             values: d.values.map(v => ({
-                weatherGroup: v.weatherGroup,
+                weatherGroup: v.weatherGroup, // Keep dataset labels
                 count: v[selectedCategory] || 0 
             }))
         }));
 
-        // ✅ 修正 Y 轴范围计算
         yScale.domain([
             0,
             d3.max(filteredData.flatMap(d => d.values.map(v => v.count)))
         ]);
 
-        // ✅ 移除旧的折线
         svgLine.selectAll(".data-line").remove();
 
-        // ✅ 绘制新折线
         weatherCategories.forEach(weatherGroup => {
             const lineData = filteredData.map(d => ({
                 year: d.year,
@@ -106,14 +147,17 @@ d3.csv("aircraft_incidents.csv").then(data => {
                 .attr("d", line);
         });
 
-        // ✅ 确保 Y 轴更新
         svgLine.select(".y-axis")
             .transition()
             .duration(1000)
             .call(d3.axisLeft(yScale));
+
+        svgLine.select(".x-axis")
+            .transition()
+            .duration(1000)
+            .call(d3.axisBottom(xScale).tickFormat(d3.format("d")));
     }        
 
-    // ✅ 修正 trendline 监听
     d3.select("#trendline-toggle").on("change", function() {
         const isChecked = d3.select(this).property("checked"); 
         const selectedCategory = d3.select("#categorySelect").property("value");
@@ -125,12 +169,10 @@ d3.csv("aircraft_incidents.csv").then(data => {
         }
     });
 
-    // ✅ 绑定事件监听到 dropdown
     d3.select("#categorySelect").on("change", function () {
         const selectedCategory = d3.select(this).property("value");
         updateChart(selectedCategory);
     });
 
-    // ✅ 默认加载图表
-    updateChart("totalConcerned");
+    updateChart("totalFatalInjuries");
 });
